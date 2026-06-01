@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 MOTIVATSION = [
-    "🔥 Har bir qadam oldinga\\! Siz buni uddalay olasiz\\!",
+    "🔥 Har kuni bir qadam oldinga\\! Siz buni uddalay olasiz\\!",
     "⚡ Kichik harakatlar katta natijalarga olib boradi\\. Davom eting\\!",
     "🚀 Eng qiyin — boshlash\\. Boshlang, qolganini o'zingiz qilasiz\\!",
     "🎯 Maqsad aniq, yo'l ma'lum\\. Faqat harakat kerak\\!",
@@ -60,8 +60,8 @@ VAQT_KEYBOARD = ReplyKeyboardMarkup([
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 *Salom\\!* Men sizning kunlik rejalashtiruvchi yordamchingizman\\.\n\n"
-        "🌙 Har kuni kechqurun ertangi rejaingizni so'rayman\\!\n"
-        "📌 Quyidagi tugmalardan foydalaning:",
+        "Har kuni kechqurun ertangi rejaingizni so'rayman\\!\n"
+        "Quyidagi tugmalardan foydalaning:",
         parse_mode="MarkdownV2",
         reply_markup=MAIN_KEYBOARD
     )
