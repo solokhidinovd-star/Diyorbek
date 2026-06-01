@@ -207,23 +207,35 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif user_state.get(chat_id) == "adding_task_label":
         user_state[chat_id] = "adding_task_time:" + text
         await update.message.reply_text(
-            "Vaqtini yozing (masalan 09:00):",
+            "Vaqtini yozing (masalan 09:00)
+Yoki vaqt kerak bolmasa: shartmas",
             reply_markup=MAIN_KEYBOARD
         )
     elif user_state.get(chat_id, "").startswith("adding_task_time:"):
         label = user_state[chat_id].replace("adding_task_time:", "")
         vaqt = text.strip()
-        try:
-            datetime.strptime(vaqt, "%H:%M")
-            data = load_data()
-            task = {"id": len(data["tasks"]) + 1, "time": vaqt, "label": label, "done": False}
-            data["tasks"].append(task)
-            data["tasks"].sort(key=lambda x: x["time"])
-            save_data(data)
-            user_state[chat_id] = None
+        vaqtsiz = vaqt.lower() in ["shartmas", "yoq", "-", "skip", "kerak emas", "vaqtsiz"]
+        if vaqtsiz:
+            vaqt = "--:--"
+        else:
+            try:
+                datetime.strptime(vaqt, "%H:%M")
+            except ValueError:
+                await update.message.reply_text(
+                    "Vaqt formati notogri. Qaytadan yozing (misol: 09:00)\nYoki vaqt kerak bolmasa: shartmas",
+                    reply_markup=MAIN_KEYBOARD
+                )
+                return
+        data = load_data()
+        task = {"id": len(data["tasks"]) + 1, "time": vaqt, "label": label, "done": False, "no_time": vaqtsiz}
+        data["tasks"].append(task)
+        data["tasks"].sort(key=lambda x: x["time"])
+        save_data(data)
+        user_state[chat_id] = None
+        if vaqtsiz:
+            await update.message.reply_text("Vazifa qoshildi: {} (vaqtsiz)".format(label), reply_markup=MAIN_KEYBOARD)
+        else:
             await update.message.reply_text("Vazifa qoshildi: {} - {}".format(vaqt, label), reply_markup=MAIN_KEYBOARD)
-        except ValueError:
-            await update.message.reply_text("Vaqt formati notogri. Qaytadan yozing (misol: 09:00):", reply_markup=MAIN_KEYBOARD)
     elif user_state.get(chat_id) == "adding_tomorrow":
         if text.lower() in ["tayyor", "boldi", "hammasi"]:
             user_state[chat_id] = None
@@ -378,3 +390,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
