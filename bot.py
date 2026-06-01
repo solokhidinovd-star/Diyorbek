@@ -54,7 +54,7 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup([
 ], resize_keyboard=True)
 
 VAQT_KEYBOARD = ReplyKeyboardMarkup([
-    [KeyboardButton("⏰ Vaqt qosham"), KeyboardButton("⏭ Shartmas")],
+    [KeyboardButton("⏰ Vaqt qo'shaman"), KeyboardButton("⏭ Shartmas")],
 ], resize_keyboard=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
