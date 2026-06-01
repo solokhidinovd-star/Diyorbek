@@ -28,7 +28,7 @@ MOTIVATSION = [
     "🌟 Bugun qilingan ish — ertangi o'zingizga sovg'a\\!",
     "💡 Hozir qiyin tuyulsa ham, natija siz uchun kutmoqda\\!",
     "🏆 Har kuni ozgina harakat — katta muvaffaqiyatga olib boradi\\!",
-    "💪 Siz kuchli odamsiz\\. Bugun ham isbotlang\\!",
+    "🔖 Siz kuchli odamsiz\\. Bugun ham isbotlang\\!",
     "⏰ Dangasalik vaqtinchalik, muvaffaqiyat abadiy\\!",
 ]
 
