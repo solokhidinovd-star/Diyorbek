@@ -21,15 +21,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 MOTIVATSION = [
-    "Har bir qadam oldinga! Siz buni uddalay olasiz!",
-    "Kichik harakatlar katta natijalarga olib boradi. Davom eting!",
-    "Eng qiyin boshlash. Boshlang, qolganini ozingiz qilasiz!",
-    "Maqsad aniq, yol malum. Faqat harakat kerak!",
-    "Bugun qilingan ish ertangi ozingizga sovga!",
-    "Hozir qiyin tuyulsa ham, natija siz uchun kutmoqda!",
-    "Har kuni ozgina harakat katta muvaffaqiyatga olib boradi!",
-    "Siz kuchli odamsiz. Bugun ham isbotlang!",
-    "Dangasalik vaqtinchalik, muvaffaqiyat abadiy!",
+    "🔥 Har bir qadam oldinga\\! Siz buni uddalay olasiz\\!",
+    "⚡ Kichik harakatlar katta natijalarga olib boradi\\. Davom eting\\!",
+    "🚀 Eng qiyin — boshlash\\. Boshlang, qolganini o'zingiz qilasiz\\!",
+    "🎯 Maqsad aniq, yo'l ma'lum\\. Faqat harakat kerak\\!",
+    "🌟 Bugun qilingan ish — ertangi o'zingizga sovg'a\\!",
+    "💡 Hozir qiyin tuyulsa ham, natija siz uchun kutmoqda\\!",
+    "🏆 Har kuni ozgina harakat — katta muvaffaqiyatga olib boradi\\!",
+    "💪 Siz kuchli odamsiz\\. Bugun ham isbotlang\\!",
+    "⏰ Dangasalik vaqtinchalik, muvaffaqiyat abadiy\\!",
 ]
 
 def motivatsiya():
@@ -59,7 +59,10 @@ VAQT_KEYBOARD = ReplyKeyboardMarkup([
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Salom! Men sizning kunlik rejalashtiruvchi yordamchingizman.\n\nHar kuni kechqurun ertangi rejaingizni soraman!",
+        "👋 *Salom\\!* Men sizning kunlik rejalashtiruvchi yordamchingizman\\.\n\n"
+        "🌙 Har kuni kechqurun ertangi rejaingizni so'rayman\\!\n"
+        "📌 Quyidagi tugmalardan foydalaning:",
+        parse_mode="MarkdownV2",
         reply_markup=MAIN_KEYBOARD
     )
 
@@ -68,28 +71,53 @@ async def reja_korsatish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tasks = data.get("tasks", [])
     if not tasks:
         await update.message.reply_text(
-            "Bugun hech qanday vazifa yoq.\n\nQoshish uchun Vazifa qosh tugmasini bosing!",
+            "📭 _Bugun hech qanday vazifa yo'q\\._\n\n➕ Qo'shish uchun *Vazifa qosh* tugmasini bosing\\!",
+            parse_mode="MarkdownV2",
             reply_markup=MAIN_KEYBOARD
         )
         return
     done = sum(1 for t in tasks if t.get("done"))
     total = len(tasks)
     pct = round(done / total * 100) if total else 0
-    lines = ["Bugungi vazifalar ({}/{} - {}%):\n".format(done, total, pct)]
+    
+    if pct == 100:
+        bar = "🟩🟩🟩🟩🟩"
+    elif pct >= 80:
+        bar = "🟩🟩🟩🟩⬜"
+    elif pct >= 60:
+        bar = "🟩🟩🟩⬜⬜"
+    elif pct >= 40:
+        bar = "🟩🟩⬜⬜⬜"
+    elif pct >= 20:
+        bar = "🟩⬜⬜⬜⬜"
+    else:
+        bar = "⬜⬜⬜⬜⬜"
+
+    lines = ["📋 *Bugungi vazifalar*\n"]
+    lines.append("{} `{}/{}` — *{}%*\n".format(bar, done, total, pct))
     for i, t in enumerate(tasks, 1):
         icon = "✅" if t.get("done") else "⬜"
-        vaqt_str = "" if t.get("no_time") else "{} - ".format(t["time"])
-        lines.append("{} {}. {}{}".format(icon, i, vaqt_str, t["label"]))
+        vaqt_str = "" if t.get("no_time") else "⏰ `{}` — ".format(t["time"])
+        label = t["label"].replace(".", "\\.").replace("!", "\\!").replace("-", "\\-").replace("(", "\\(").replace(")", "\\)").replace("_", "\\_")
+        if t.get("done"):
+            lines.append("{} {}~{}~".format(icon, vaqt_str, label))
+        else:
+            lines.append("{} {}*{}*".format(icon, vaqt_str, label))
+    
     if pct == 100:
-        lines.append("\nBarcha vazifalar bajarildi! Ajoyib!")
+        lines.append("\n🎉 *Barcha vazifalar bajarildi\\! Ajoyib\\!*")
     elif pct >= 50:
         lines.append("\n" + motivatsiya())
-    await update.message.reply_text("\n".join(lines), reply_markup=MAIN_KEYBOARD)
+    await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=MAIN_KEYBOARD)
 
 async def qosh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if len(args) < 1:
-        await update.message.reply_text("Format: /qosh Vazifa nomi\nYoki: /qosh 09:00 Vazifa nomi", reply_markup=MAIN_KEYBOARD)
+        await update.message.reply_text(
+            "📌 Format: `/qosh Vazifa nomi`\nYoki vaqt bilan: `/qosh 09:00 Vazifa nomi`",
+            parse_mode="MarkdownV2",
+            reply_markup=MAIN_KEYBOARD
+        )
         return
     try:
         datetime.strptime(args[0], "%H:%M")
@@ -105,29 +133,27 @@ async def qosh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data["tasks"].append(task)
     data["tasks"].sort(key=lambda x: x["time"])
     save_data(data)
+    label_esc = label.replace(".", "\\.").replace("!", "\\!").replace("-", "\\-").replace("(", "\\(").replace(")", "\\)")
     if no_time:
-        await update.message.reply_text("Vazifa qoshildi: {} (vaqtsiz)".format(label), reply_markup=MAIN_KEYBOARD)
+        await update.message.reply_text("✅ Vazifa qo'shildi\\!\n\n📌 *{}* \\(vaqtsiz\\)".format(label_esc), parse_mode="MarkdownV2", reply_markup=MAIN_KEYBOARD)
     else:
-        await update.message.reply_text("Vazifa qoshildi: {} - {}".format(vaqt, label), reply_markup=MAIN_KEYBOARD)
+        await update.message.reply_text("✅ Vazifa qo'shildi\\!\n\n⏰ `{}` — *{}*".format(vaqt, label_esc), parse_mode="MarkdownV2", reply_markup=MAIN_KEYBOARD)
 
 async def vazifa_qosh_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_state[update.effective_chat.id] = "adding_task_label"
-    await update.message.reply_text("Vazifa nomini yozing:", reply_markup=MAIN_KEYBOARD)
+    await update.message.reply_text("✏️ *Vazifa nomini yozing:*", parse_mode="MarkdownV2", reply_markup=MAIN_KEYBOARD)
 
 async def bajardim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
     tasks = [t for t in data["tasks"] if not t.get("done")]
     if not tasks:
-        await update.message.reply_text("Barcha vazifalar allaqachon bajarilgan!", reply_markup=MAIN_KEYBOARD)
+        await update.message.reply_text("🎉 *Barcha vazifalar allaqachon bajarilgan\\!*", parse_mode="MarkdownV2", reply_markup=MAIN_KEYBOARD)
         return
     keyboard = []
     for t in tasks:
         vaqt_str = "" if t.get("no_time") else "{} - ".format(t["time"])
-        keyboard.append([InlineKeyboardButton(
-            "{}{}".format(vaqt_str, t["label"]),
-            callback_data="done_{}".format(t["id"])
-        )])
-    await update.message.reply_text("Qaysi vazifani bajardingiz?", reply_markup=InlineKeyboardMarkup(keyboard))
+        keyboard.append([InlineKeyboardButton("⬜ {}{}".format(vaqt_str, t["label"]), callback_data="done_{}".format(t["id"]))])
+    await update.message.reply_text("☑️ *Qaysi vazifani bajardingiz?*", parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -144,50 +170,58 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_data(data)
         done = sum(1 for t in data["tasks"] if t.get("done"))
         total = len(data["tasks"])
-        msg = "{} bajarildi!\n\n".format(label)
+        label_esc = label.replace(".", "\\.").replace("!", "\\!").replace("-", "\\-").replace("(", "\\(").replace(")", "\\)").replace("_", "\\_")
+        msg = "✅ *{}* — bajarildi\\!\n\n".format(label_esc)
         if done == total:
-            msg += "Barcha vazifalar bajarildi! Ajoyib kun!"
+            msg += "🏆 *Barcha vazifalar bajarildi\\! Ajoyib kun\\!*"
         else:
-            msg += "Bajarildi: {}/{}\n{}".format(done, total, motivatsiya())
-        await query.edit_message_text(msg)
+            msg += "📊 Bajarildi: `{}/{}`\n\n{}".format(done, total, motivatsiya())
+        await query.edit_message_text(msg, parse_mode="MarkdownV2")
 
 async def tahlil(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
     tasks = data.get("tasks", [])
     if not tasks:
-        await update.message.reply_text("Tahlil qilish uchun vazifalar yoq.", reply_markup=MAIN_KEYBOARD)
+        await update.message.reply_text("📭 _Tahlil qilish uchun vazifalar yo'q\\._", parse_mode="MarkdownV2", reply_markup=MAIN_KEYBOARD)
         return
     done = [t for t in tasks if t.get("done")]
     undone = [t for t in tasks if not t.get("done")]
     pct = round(len(done) / len(tasks) * 100) if tasks else 0
-    lines = ["Kunlik tahlil\n", "Samaradorlik: {}%".format(pct),
-             "Bajarildi: {} ta".format(len(done)), "Bajarilmadi: {} ta\n".format(len(undone))]
+    
+    lines = ["📊 *Kunlik tahlil*\n"]
+    lines.append("📈 Samaradorlik: *{}%*".format(pct))
+    lines.append("✅ Bajarildi: *{} ta*".format(len(done)))
+    lines.append("❌ Bajarilmadi: *{} ta*\n".format(len(undone)))
+    
     if done:
-        lines.append("Bajarilgan:")
+        lines.append("*✅ Bajarilgan:*")
         for t in done:
-            vaqt_str = "" if t.get("no_time") else "{} - ".format(t["time"])
-            lines.append("  {}{}".format(vaqt_str, t["label"]))
+            vaqt_str = "" if t.get("no_time") else "⏰`{}` ".format(t["time"])
+            label = t["label"].replace(".", "\\.").replace("!", "\\!").replace("-", "\\-").replace("(", "\\(").replace(")", "\\)").replace("_", "\\_")
+            lines.append("  ~{}~{}".format(vaqt_str, label))
     if undone:
-        lines.append("\nBajarilmagan:")
+        lines.append("\n*❌ Bajarilmagan:*")
         for t in undone:
-            vaqt_str = "" if t.get("no_time") else "{} - ".format(t["time"])
-            lines.append("  {}{}".format(vaqt_str, t["label"]))
+            vaqt_str = "" if t.get("no_time") else "⏰`{}` ".format(t["time"])
+            label = t["label"].replace(".", "\\.").replace("!", "\\!").replace("-", "\\-").replace("(", "\\(").replace(")", "\\)").replace("_", "\\_")
+            lines.append("  • {}{}".format(vaqt_str, label))
+    
     if pct == 100:
-        lines.append("\nAjoyib! Barcha rejalar bajarildi!")
+        lines.append("\n🏆 *Ajoyib\\! Barcha rejalar bajarildi\\!*")
     elif pct >= 70:
-        lines.append("\nYaxshi natija!")
+        lines.append("\n👍 *Yaxshi natija\\!* Ertaga yanada yaxshiroq bo'lasiz\\!")
     else:
-        lines.append("\nErtaga yangi imkoniyat!")
-    await update.message.reply_text("\n".join(lines), reply_markup=MAIN_KEYBOARD)
+        lines.append("\n💡 _Ertaga yangi imkoniyat\\! Bugungi tajribadan o'rganing\\._")
+    await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=MAIN_KEYBOARD)
 
 async def motivatsiya_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(motivatsiya(), reply_markup=MAIN_KEYBOARD)
+    await update.message.reply_text("💪 *Bugungi rag'bat:*\n\n{}".format(motivatsiya()), parse_mode="MarkdownV2", reply_markup=MAIN_KEYBOARD)
 
 async def tozala(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
     data["tasks"] = []
     save_data(data)
-    await update.message.reply_text("Barcha vazifalar ochirildi.", reply_markup=MAIN_KEYBOARD)
+    await update.message.reply_text("🗑 _Barcha vazifalar o'chirildi\\._", parse_mode="MarkdownV2", reply_markup=MAIN_KEYBOARD)
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -205,14 +239,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await motivatsiya_cmd(update, context)
     elif text == "🗑 Tozala":
         await tozala(update, context)
-
     elif user_state.get(chat_id) == "adding_task_label":
         user_state[chat_id] = "adding_task_time:" + text
-        await update.message.reply_text(
-            "Vaqt qoshmoqchimisiz?",
-            reply_markup=VAQT_KEYBOARD
-        )
-
+        await update.message.reply_text("🕐 *Vaqt qo'shmoqchimisiz?*", parse_mode="MarkdownV2", reply_markup=VAQT_KEYBOARD)
     elif user_state.get(chat_id, "").startswith("adding_task_time:"):
         label = user_state[chat_id].replace("adding_task_time:", "")
         if text == "⏭ Shartmas":
@@ -221,13 +250,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             data["tasks"].append(task)
             save_data(data)
             user_state[chat_id] = None
-            await update.message.reply_text("Vazifa qoshildi: {} (vaqtsiz)".format(label), reply_markup=MAIN_KEYBOARD)
+            label_esc = label.replace(".", "\\.").replace("!", "\\!").replace("-", "\\-").replace("(", "\\(").replace(")", "\\)").replace("_", "\\_")
+            await update.message.reply_text("✅ Vazifa qo'shildi\\!\n\n📌 *{}* \\(vaqtsiz\\)".format(label_esc), parse_mode="MarkdownV2", reply_markup=MAIN_KEYBOARD)
         elif text == "⏰ Vaqt qosham":
             user_state[chat_id] = "entering_time:" + label
-            await update.message.reply_text("Vaqtni yozing (masalan 09:00):", reply_markup=MAIN_KEYBOARD)
+            await update.message.reply_text("⏰ *Vaqtni yozing* \\(masalan `09:00`\\):", parse_mode="MarkdownV2", reply_markup=MAIN_KEYBOARD)
         else:
             await update.message.reply_text("Iltimos tugmani bosing:", reply_markup=VAQT_KEYBOARD)
-
     elif user_state.get(chat_id, "").startswith("entering_time:"):
         label = user_state[chat_id].replace("entering_time:", "")
         try:
@@ -238,10 +267,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             data["tasks"].sort(key=lambda x: x["time"])
             save_data(data)
             user_state[chat_id] = None
-            await update.message.reply_text("Vazifa qoshildi: {} - {}".format(text.strip(), label), reply_markup=MAIN_KEYBOARD)
+            label_esc = label.replace(".", "\\.").replace("!", "\\!").replace("-", "\\-").replace("(", "\\(").replace(")", "\\)").replace("_", "\\_")
+            await update.message.reply_text("✅ Vazifa qo'shildi\\!\n\n⏰ `{}` — *{}*".format(text.strip(), label_esc), parse_mode="MarkdownV2", reply_markup=MAIN_KEYBOARD)
         except ValueError:
-            await update.message.reply_text("Vaqt formati notogri. Qaytadan yozing (misol: 09:00):", reply_markup=MAIN_KEYBOARD)
-
+            await update.message.reply_text("❌ _Vaqt formati noto'g'ri\\. Qaytadan yozing_ \\(misol: `09:00`\\):", parse_mode="MarkdownV2", reply_markup=MAIN_KEYBOARD)
     elif user_state.get(chat_id) == "adding_tomorrow":
         if text.lower() in ["tayyor", "boldi", "hammasi"]:
             user_state[chat_id] = None
@@ -249,7 +278,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             data["tasks"] = data.get("tomorrow_tasks", [])
             data["tomorrow_tasks"] = []
             save_data(data)
-            await update.message.reply_text("{} ta vazifa saqlandi! Yaxshi tun!".format(len(data["tasks"])), reply_markup=MAIN_KEYBOARD)
+            await update.message.reply_text("✅ *{} ta vazifa saqlandi\\!*\n\n🌙 _Yaxshi tun\\!_".format(len(data["tasks"])), parse_mode="MarkdownV2", reply_markup=MAIN_KEYBOARD)
         else:
             parts = text.strip().split(" ", 1)
             try:
@@ -266,30 +295,32 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 data["tomorrow_tasks"] = []
             data["tomorrow_tasks"].append({"id": len(data["tomorrow_tasks"]) + 1, "time": vaqt, "label": label, "done": False, "no_time": no_time})
             save_data(data)
-            vaqt_str = "" if no_time else "{} - ".format(vaqt)
-            await update.message.reply_text("Qoshildi: {}{}\n\nYana qoshing yoki Tayyor deb yozing.".format(vaqt_str, label), reply_markup=MAIN_KEYBOARD)
+            label_esc = label.replace(".", "\\.").replace("!", "\\!").replace("-", "\\-").replace("(", "\\(").replace(")", "\\)").replace("_", "\\_")
+            vaqt_str = "" if no_time else "⏰ `{}` — ".format(vaqt)
+            await update.message.reply_text("➕ Qo'shildi: {}{}\n\n_Yana qo'shing yoki_ *Tayyor* _deb yozing\\._".format(vaqt_str, label_esc), parse_mode="MarkdownV2", reply_markup=MAIN_KEYBOARD)
     else:
-        await update.message.reply_text("Quyidagi tugmalardan foydalaning:", reply_markup=MAIN_KEYBOARD)
+        await update.message.reply_text("📌 Quyidagi tugmalardan foydalaning:", reply_markup=MAIN_KEYBOARD)
 
 async def kechki_eslatma(app):
     user_state[CHAT_ID] = "adding_tomorrow"
     data = load_data()
     data["tomorrow_tasks"] = []
     save_data(data)
-    await app.bot.send_message(chat_id=CHAT_ID, text="Kechqurun eslatmasi!\n\nErtangi kunlik rejangizni kiriting.\nFormat: 09:00 Vazifa nomi (yoki faqat vazifa nomi)\n\nBarcha vazifalarni kiritib bolgach Tayyor deb yozing.")
+    await app.bot.send_message(chat_id=CHAT_ID, parse_mode="MarkdownV2", text="🌙 *Kechqurun eslatmasi\\!*\n\nErtangi kunlik rejangizni kiriting\\.\n\n📝 Format: `09:00 Vazifa nomi`\nYoki faqat: `Vazifa nomi` \\(vaqtsiz\\)\n\n_Barcha vazifalarni kiritib bo'lgach_ *Tayyor* _deb yozing\\._")
 
 async def ertalab_eslatma(app):
     data = load_data()
     tasks = data.get("tasks", [])
     if not tasks:
-        await app.bot.send_message(chat_id=CHAT_ID, text="Xayrli tong!\n\nBugun hech qanday reja yoq. Vazifa qosh tugmasini bosing!")
+        await app.bot.send_message(chat_id=CHAT_ID, parse_mode="MarkdownV2", text="☀️ *Xayrli tong\\!*\n\n📭 _Bugun hech qanday reja yo'q\\._\nVazifa qosh tugmasini bosing\\!")
         return
-    lines = ["Xayrli tong! Bugungi rejangiz:\n"]
+    lines = ["☀️ *Xayrli tong\\!* Bugungi rejangiz:\n"]
     for i, t in enumerate(tasks, 1):
-        vaqt_str = "" if t.get("no_time") else "{} - ".format(t["time"])
-        lines.append("{}. {}{}".format(i, vaqt_str, t["label"]))
-    lines.append("\nBugun hammasi siz uchun! Muvaffaqiyat!")
-    await app.bot.send_message(chat_id=CHAT_ID, text="\n".join(lines))
+        vaqt_str = "" if t.get("no_time") else "⏰`{}` — ".format(t["time"])
+        label = t["label"].replace(".", "\\.").replace("!", "\\!").replace("-", "\\-").replace("(", "\\(").replace(")", "\\)").replace("_", "\\_")
+        lines.append("{}\\. {}*{}*".format(i, vaqt_str, label))
+    lines.append("\n💪 _Bugun hammasi siz uchun\\! Muvaffaqiyat\\!_")
+    await app.bot.send_message(chat_id=CHAT_ID, text="\n".join(lines), parse_mode="MarkdownV2")
 
 async def vazifa_eslatmalari(app):
     now = datetime.now(TIMEZONE).strftime("%H:%M")
@@ -298,14 +329,16 @@ async def vazifa_eslatmalari(app):
     changed = False
     for t in tasks:
         if not t.get("no_time") and t.get("time") == now and not t.get("done") and not t.get("reminded"):
-            await app.bot.send_message(chat_id=CHAT_ID, text="Vaqt keldi!\n\n{} - {}\n\n{}\n\nBajargach Bajardim tugmasini bosing!".format(t["time"], t["label"], motivatsiya()))
+            label = t["label"].replace(".", "\\.").replace("!", "\\!").replace("-", "\\-").replace("(", "\\(").replace(")", "\\)").replace("_", "\\_")
+            await app.bot.send_message(chat_id=CHAT_ID, parse_mode="MarkdownV2",
+                text="⏰ *Vaqt keldi\\!*\n\n📌 `{}` — *{}*\n\n{}\n\n_Bajargach_ ✅ *Bajardim* _tugmasini bosing\\!_".format(t["time"], label, motivatsiya()))
             t["reminded"] = True
             changed = True
     if changed:
         save_data(data)
 
 async def avto_motivatsiya(app):
-    await app.bot.send_message(chat_id=CHAT_ID, text="Kunlik rag'bat!\n\n{}".format(motivatsiya()))
+    await app.bot.send_message(chat_id=CHAT_ID, parse_mode="MarkdownV2", text="💪 *Kunlik rag'bat\\!*\n\n{}".format(motivatsiya()))
 
 async def dangasa_tekshirish(app):
     now = datetime.now(TIMEZONE)
@@ -314,7 +347,8 @@ async def dangasa_tekshirish(app):
     data = load_data()
     undone = [t for t in data.get("tasks", []) if not t.get("done")]
     if len(undone) >= 2:
-        await app.bot.send_message(chat_id=CHAT_ID, text="Eslatma!\n\nHali {} ta vazifa bajarilmagan.\n\n{}\n\nHoziroq boshlang!".format(len(undone), motivatsiya()))
+        await app.bot.send_message(chat_id=CHAT_ID, parse_mode="MarkdownV2",
+            text="🔔 *Eslatma\\!*\n\nHali *{} ta* vazifa bajarilmagan\\.\n\n{}\n\n_Hoziroq boshlang\\!_ 🚀".format(len(undone), motivatsiya()))
 
 async def kechki_tahlil(app):
     data = load_data()
@@ -323,15 +357,17 @@ async def kechki_tahlil(app):
         return
     done = [t for t in tasks if t.get("done")]
     pct = round(len(done) / len(tasks) * 100)
-    lines = ["Kunlik tahlil\n", "Samaradorlik: {}%".format(pct), "Bajarildi: {}/{}".format(len(done), len(tasks))]
+    lines = ["🌙 *Kunlik yakuniy tahlil*\n"]
+    lines.append("📈 Samaradorlik: *{}%*".format(pct))
+    lines.append("✅ Bajarildi: *{}/{}*\n".format(len(done), len(tasks)))
     if pct == 100:
-        lines.append("\nMukammal kun!")
+        lines.append("🏆 *Mukammal kun\\! Barcha rejalar bajarildi\\!*")
     elif pct >= 70:
-        lines.append("\nYaxshi natija!")
+        lines.append("👍 *Yaxshi natija\\!* Ertaga yanada yaxshiroq bo'lasiz\\!")
     else:
-        lines.append("\nErtaga yangi imkoniyat!")
-    lines.append("\n\nErtangi rejalaringiz uchun 21:00 da yana yozaman!")
-    await app.bot.send_message(chat_id=CHAT_ID, text="\n".join(lines))
+        lines.append("💡 _Ertaga yangi imkoniyat\\! Bugungi tajribadan o'rganing\\._")
+    lines.append("\n📅 _Ertangi rejalaringiz uchun 21:00 da yana yozaman\\!_")
+    await app.bot.send_message(chat_id=CHAT_ID, text="\n".join(lines), parse_mode="MarkdownV2")
 
 def main():
     app = Application.builder().token(TOKEN).build()
@@ -361,5 +397,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
