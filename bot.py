@@ -828,7 +828,7 @@ async def job_jurnal_eslatma(app):
 
 # ─── AI COACH ────────────────────────────────────────────────────────────────
 
-ANTHROPIC_TOKEN = "YOUR_ANTHROPIC_API_KEY"  # Anthropic API key kiriting
+GROQ_TOKEN = "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"
 
 async def cmd_ai_coach(update: Update, ctx):
     user_state[update.effective_chat.id] = "ai_coach"
@@ -849,14 +849,7 @@ async def ask_ai_coach(update, question):
     books = load("books")
     balls = calculate_rating()
 
-    context_info = """Foydalanuvchi:
-- Bajarilgan: {}
-- Bajarilmagan: {}
-- Namoz: {}/5
-- Ball: {}
-- Streak: {}
-- Maqsadlar: {}
-- Kitob: {}""".format(
+    context_info = "Foydalanuvchi: Bajarilgan: {}, Bajarilmagan: {}, Namoz: {}/5, Ball: {}, Streak: {}, Maqsadlar: {}, Kitob: {}".format(
         ", ".join(t["label"] for t in done_r) or "yoq",
         ", ".join(t["label"] for t in undone_r) or "yoq",
         len(done_p), balls,
@@ -865,31 +858,35 @@ async def ask_ai_coach(update, question):
         books.get("current", {}).get("name", "yoq") if books.get("current") else "yoq"
     )
 
-    await update.message.reply_text("🤖 _Javob tayyorlanmoqda\\\.\.\._", parse_mode="MarkdownV2")
+    await update.message.reply_text("🤖 _Javob tayyorlanmoqda\.\.\._", parse_mode="MarkdownV2")
 
     try:
         async with aiohttp.ClientSession() as session:
             payload = {
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 600,
-                "messages": [{
-                    "role": "user",
-                    "content": "Sen o'zbek tilida gapiradigan shaxsiy AI murabbiysan.\n{}\n\nSavol: {}\n\nQisqa (3-5 gap), aniq va rag'batlantiruvchi javob ber. O'zbek tilida.".format(context_info, question)
-                }]
+                "model": "llama-3.1-8b-instant",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "Sen o'zbek tilida gapiradigan shaxsiy AI murabbiysan. Qisqa (3-5 gap), aniq va ragbatlantiruvchi javob ber. " + context_info
+                    },
+                    {
+                        "role": "user",
+                        "content": question
+                    }
+                ]
             }
             headers = {
                 "Content-Type": "application/json",
-                "x-api-key": ANTHROPIC_TOKEN,
-                "anthropic-version": "2023-06-01"
+                "Authorization": "Bearer " + GROQ_TOKEN
             }
-            async with session.post("https://api.anthropic.com/v1/messages", json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 result = await resp.json()
-                answer = result["content"][0]["text"]
+                answer = result["choices"][0]["message"]["content"]
                 answer_esc = escape_md(answer)
                 await update.message.reply_text("🤖 *AI Coach:*\n\n{}".format(answer_esc), parse_mode="MarkdownV2", reply_markup=MAIN_KB)
     except Exception as e:
         logger.error("AI Coach xato: {}".format(e))
-        await update.message.reply_text("❌ _AI Coach hozir ishlamayapti\\. Keyinroq urinib ko'ring\\._", parse_mode="MarkdownV2", reply_markup=MAIN_KB)
+        await update.message.reply_text("❌ _AI Coach hozir ishlamayapti\. Keyinroq urinib ko'ring\._", parse_mode="MarkdownV2", reply_markup=MAIN_KB)
 
 
 def main():
