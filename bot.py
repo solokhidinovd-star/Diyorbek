@@ -4,10 +4,8 @@ import os
 import sys
 import fcntl
 from datetime import datetime, date, timedelta
-import asyncio
-import aiohttp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pytz
 
@@ -20,24 +18,24 @@ LOCK_FILE = "/tmp/dailybot.lock"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger(__name__)
 
-# ── LOCK (ikki marta ishga tushmaslik) ──────────────────────────────────────
+# ── LOCK ────────────────────────────────────────────────────────────────────
 def acquire_lock():
     try:
         lf = open(LOCK_FILE, "w")
         fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return lf
     except IOError:
-        log.warning("Bot allaqachon ishlamoqda!")
+        log.warning("Bot is already running!")
         sys.exit(0)
 
-# ── AVTOMATIK KUNLIK TASKLAR (yakshanba=6 dan tashqari) ─────────────────────
+# ── AUTO DAILY TASKS (except Sunday) ────────────────────────────────────────
 AUTO_TASKS = [
-    {"label": "CRM check",                  "time": "10:00"},
-    {"label": "Instagram directga qarash",  "time": "10:15"},
-    {"label": "Lead report on Marketing",   "time": "19:00"},
-    {"label": "Check Youtube Leads",        "time": None},
-    {"label": "Read 5 pages book",          "time": None},
-    {"label": "Do tasks given by 4prep",    "time": None},
+    {"label": "CRM check",                     "time": "10:00"},
+    {"label": "Check Instagram DMs",           "time": "10:15"},
+    {"label": "Lead report on Marketing group","time": "19:00"},
+    {"label": "Check YouTube Leads",           "time": None},
+    {"label": "Read 5 pages of a book",        "time": None},
+    {"label": "Do tasks given by 4prep",       "time": None},
 ]
 
 # ── DATA ────────────────────────────────────────────────────────────────────
@@ -47,7 +45,7 @@ def load():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"tasks": [], "report": [], "state": {}, "last_date": ""}
+    return {"tasks": [], "last_date": ""}
 
 def save(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -64,8 +62,9 @@ def next_id(tasks):
 
 # ── KEYBOARD ────────────────────────────────────────────────────────────────
 MAIN_KB = ReplyKeyboardMarkup([
-    ["📋 Rejalar", "✅ Bajarildi"],
-    ["➕ Task qo'sh", "📊 Daily Report"],
+    ["📋 My Tasks", "✅ Mark Done"],
+    ["↩️ Undo Done", "➕ Add Task"],
+    ["📊 Daily Report"],
 ], resize_keyboard=True)
 
 # ── HELPERS ─────────────────────────────────────────────────────────────────
@@ -81,7 +80,7 @@ def task_line(t):
     label = esc(t["label"])
     if t.get("done"):
         return "{}{} ~{}~".format(icon, time_str, label)
-    return "{}{} {}".format(icon, time_str, label)
+    return "{}{} *{}*".format(icon, time_str, label)
 
 def progress_bar(done, total):
     if total == 0:
@@ -95,10 +94,8 @@ def reset_daily(data):
     if data.get("last_date") == today:
         return data
 
-    # Kecha bajarilmagan tasklarni o'chirish
     data["tasks"] = []
 
-    # Avtomatik tasklarni qo'shish (yakshanba bo'lmasa)
     if not is_sunday():
         for i, at in enumerate(AUTO_TASKS):
             data["tasks"].append({
@@ -107,38 +104,29 @@ def reset_daily(data):
                 "time": at["time"],
                 "done": False,
                 "auto": True,
+                "reminded": False,
                 "reminded_30": False,
+                "reminded_at": None,
             })
 
     data["last_date"] = today
     save(data)
     return data
 
-# ── HANDLERS ────────────────────────────────────────────────────────────────
+# ── USER STATE ───────────────────────────────────────────────────────────────
 user_state = {}
 
-async def cmd_start(update: Update, ctx):
-    data = load()
-    data = reset_daily(data)
-    await update.message.reply_text(
-        "👋 *Salom\\!* Kunlik rejalashtiruvchi botman\\.\n\n"
-        "📋 *Rejalar* — bugungi tasklarni ko'rish\n"
-        "✅ *Bajarildi* — task belgilash\n"
-        "➕ *Task qo'sh* — yangi task\n"
-        "📊 *Daily Report* — bugungi hisobot",
-        parse_mode="MarkdownV2",
-        reply_markup=MAIN_KB
-    )
-
-async def show_tasks(update: Update, ctx=None):
+# ── SHOW TASKS ───────────────────────────────────────────────────────────────
+async def show_tasks(update, ctx=None):
     data = load()
     data = reset_daily(data)
     tasks = data["tasks"]
 
     if not tasks:
-        msg = "📭 _Bugun hech qanday task yo'q\\._"
-        if update.message:
-            await update.message.reply_text(msg, parse_mode="MarkdownV2", reply_markup=MAIN_KB)
+        await update.message.reply_text(
+            "📭 _No tasks for today\\._\n\nUse ➕ *Add Task* to add one\\!",
+            parse_mode="MarkdownV2", reply_markup=MAIN_KB
+        )
         return
 
     done = sum(1 for t in tasks if t.get("done"))
@@ -147,68 +135,128 @@ async def show_tasks(update: Update, ctx=None):
     bar = progress_bar(done, total)
 
     lines = [
-        "📋 *Bugungi rejalar*\n",
-        "{} `{}/{}` — *{}%*\n".format(bar, done, total, pct),
+        "📋 *Today's Tasks*\n",
+        "{} `{}/{}` — *{}%* completed\n".format(bar, done, total, pct),
     ]
     for t in tasks:
         lines.append(task_line(t))
 
-    if update.message:
-        await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=MAIN_KB)
+    await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=MAIN_KB)
 
-async def show_done_menu(update: Update, ctx):
+# ── MARK DONE (multi-select) ─────────────────────────────────────────────────
+async def show_done_menu(update, ctx):
     data = load()
     undone = [t for t in data["tasks"] if not t.get("done")]
     if not undone:
-        await update.message.reply_text("🎉 *Barcha tasklar bajarildi\\!*", parse_mode="MarkdownV2", reply_markup=MAIN_KB)
+        await update.message.reply_text(
+            "🎉 *All tasks are completed\\! Great job\\!*",
+            parse_mode="MarkdownV2", reply_markup=MAIN_KB
+        )
         return
+
     kb = []
     for t in undone:
         time_str = " ({})".format(t["time"]) if t.get("time") else ""
-        kb.append([InlineKeyboardButton("⬜ {}{}".format(t["label"], time_str), callback_data="done_{}".format(t["id"]))])
-    await update.message.reply_text("☑️ *Qaysi taskni bajardingiz?*", parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(kb))
+        kb.append([InlineKeyboardButton(
+            "⬜ {}{}".format(t["label"], time_str),
+            callback_data="done_{}".format(t["id"])
+        )])
+    kb.append([InlineKeyboardButton("✔️ Finish selecting", callback_data="done_finish")])
 
-async def show_daily_report(update: Update, ctx):
+    await update.message.reply_text(
+        "☑️ *Select all tasks you completed:*\n_You can select multiple\\!_",
+        parse_mode="MarkdownV2",
+        reply_markup=InlineKeyboardMarkup(kb)
+    )
+
+# ── UNDO DONE ────────────────────────────────────────────────────────────────
+async def show_undo_menu(update, ctx):
+    data = load()
+    done_tasks = [t for t in data["tasks"] if t.get("done")]
+    if not done_tasks:
+        await update.message.reply_text(
+            "📭 _No completed tasks to undo\\._",
+            parse_mode="MarkdownV2", reply_markup=MAIN_KB
+        )
+        return
+
+    kb = []
+    for t in done_tasks:
+        time_str = " ({})".format(t["time"]) if t.get("time") else ""
+        kb.append([InlineKeyboardButton(
+            "✅ {}{}".format(t["label"], time_str),
+            callback_data="undo_{}".format(t["id"])
+        )])
+
+    await update.message.reply_text(
+        "↩️ *Which task do you want to mark as not done?*",
+        parse_mode="MarkdownV2",
+        reply_markup=InlineKeyboardMarkup(kb)
+    )
+
+# ── DAILY REPORT ─────────────────────────────────────────────────────────────
+async def show_daily_report(update, ctx):
     data = load()
     tasks = data["tasks"]
+
+    if not tasks:
+        await update.message.reply_text(
+            "📭 _No tasks recorded for today\\._",
+            parse_mode="MarkdownV2", reply_markup=MAIN_KB
+        )
+        return
+
     done = [t for t in tasks if t.get("done")]
     undone = [t for t in tasks if not t.get("done")]
-    pct = round(len(done) / len(tasks) * 100) if tasks else 0
+    pct = round(len(done) / len(tasks) * 100)
+    bar = progress_bar(len(done), len(tasks))
 
     lines = [
         "📊 *Daily Report — {}*\n".format(esc(today_str())),
-        "📈 Samaradorlik: *{}%*".format(pct),
-        "✅ Bajarildi: *{} ta*".format(len(done)),
-        "❌ Bajarilmadi: *{} ta*\n".format(len(undone)),
+        "{} *{}%* completed".format(bar, pct),
+        "✅ Done: *{}*   ❌ Remaining: *{}*\n".format(len(done), len(undone)),
     ]
     if done:
-        lines.append("*✅ Bajarilgan:*")
+        lines.append("*✅ Completed:*")
         for t in done:
-            lines.append("  • {}".format(esc(t["label"])))
+            time_str = " `{}`".format(t["time"]) if t.get("time") else ""
+            lines.append("  • {}{}".format(time_str, esc(t["label"])))
     if undone:
-        lines.append("\n*❌ Bajarilmagan:*")
+        lines.append("\n*❌ Not completed:*")
         for t in undone:
-            lines.append("  • {}".format(esc(t["label"])))
+            time_str = " `{}`".format(t["time"]) if t.get("time") else ""
+            lines.append("  • {}{}".format(time_str, esc(t["label"])))
 
     if pct == 100:
-        lines.append("\n🏆 *Mukammal kun\\!*")
+        lines.append("\n🏆 *Perfect day\\! You crushed it\\!*")
     elif pct >= 70:
-        lines.append("\n👍 *Yaxshi natija\\!*")
+        lines.append("\n👍 *Good job\\! Keep it up\\!*")
+    elif pct >= 40:
+        lines.append("\n💪 *You can do better tomorrow\\!*")
     else:
-        lines.append("\n💡 _Ertaga yanada yaxshiroq qilasiz\\!_")
+        lines.append("\n💡 _Tomorrow is a fresh start\\!_")
 
-    await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=MAIN_KB)
+    if update and update.message:
+        await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=MAIN_KB)
+    return "\n".join(lines)
 
-async def start_add_task(update: Update, ctx):
+# ── ADD TASK ─────────────────────────────────────────────────────────────────
+async def start_add_task(update, ctx):
     user_state[update.effective_chat.id] = "add_label"
-    await update.message.reply_text("✏️ *Task nomini yozing:*", parse_mode="MarkdownV2", reply_markup=MAIN_KB)
+    await update.message.reply_text(
+        "✏️ *Enter the task name:*",
+        parse_mode="MarkdownV2", reply_markup=MAIN_KB
+    )
 
-async def callback_handler(update: Update, ctx):
+# ── CALLBACKS ────────────────────────────────────────────────────────────────
+async def callback_handler(update, ctx):
     q = update.callback_query
     await q.answer()
+    d = q.data
 
-    if q.data.startswith("done_"):
-        task_id = int(q.data.split("_")[1])
+    # Mark done
+    if d.startswith("done_") and d != "done_finish":
+        task_id = int(d.split("_")[1])
         data = load()
         label = ""
         for t in data["tasks"]:
@@ -218,45 +266,108 @@ async def callback_handler(update: Update, ctx):
                 break
         save(data)
 
-        done = sum(1 for t in data["tasks"] if t.get("done"))
+        # Rebuild keyboard with remaining undone tasks
+        undone = [t for t in data["tasks"] if not t.get("done")]
+        done_count = sum(1 for t in data["tasks"] if t.get("done"))
         total = len(data["tasks"])
-        pct = round(done / total * 100)
+        bar = progress_bar(done_count, total)
 
-        msg = "✅ *{}* — bajarildi\\!\n\n📊 `{}/{}` — *{}%*".format(esc(label), done, total, pct)
-        if done == total:
-            msg += "\n\n🏆 *Barcha tasklar bajarildi\\! Zo'r\\!*"
-        await q.edit_message_text(msg, parse_mode="MarkdownV2")
+        if not undone:
+            await q.edit_message_text(
+                "✅ *{}* — done\\!\n\n{} *{}/{}* — *100%*\n\n🏆 *All tasks completed\\! Excellent\\!*".format(
+                    esc(label), bar, done_count, total
+                ),
+                parse_mode="MarkdownV2"
+            )
+            return
 
-    elif q.data.startswith("check30_"):
-        task_id = int(q.data.split("_")[1])
+        kb = []
+        for t in undone:
+            time_str = " ({})".format(t["time"]) if t.get("time") else ""
+            kb.append([InlineKeyboardButton(
+                "⬜ {}{}".format(t["label"], time_str),
+                callback_data="done_{}".format(t["id"])
+            )])
+        kb.append([InlineKeyboardButton("✔️ Finish selecting", callback_data="done_finish")])
+
+        await q.edit_message_text(
+            "✅ *{}* — marked done\\!\n\n{} `{}/{}` completed\n\n_Select more or tap Finish:_".format(
+                esc(label), bar, done_count, total
+            ),
+            parse_mode="MarkdownV2",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+
+    elif d == "done_finish":
+        data = load()
+        done_count = sum(1 for t in data["tasks"] if t.get("done"))
+        total = len(data["tasks"])
+        bar = progress_bar(done_count, total)
+        pct = round(done_count / total * 100) if total else 0
+        await q.edit_message_text(
+            "✔️ *Done\\!*\n\n{} `{}/{}` — *{}%* completed".format(bar, done_count, total, pct),
+            parse_mode="MarkdownV2"
+        )
+
+    # Undo done
+    elif d.startswith("undo_"):
+        task_id = int(d.split("_")[1])
+        data = load()
+        label = ""
+        for t in data["tasks"]:
+            if t["id"] == task_id:
+                t["done"] = False
+                t["reminded"] = False
+                t["reminded_30"] = False
+                label = t["label"]
+                break
+        save(data)
+
+        done_count = sum(1 for t in data["tasks"] if t.get("done"))
+        total = len(data["tasks"])
+        bar = progress_bar(done_count, total)
+
+        await q.edit_message_text(
+            "↩️ *{}* — marked as not done\\.\n\n{} `{}/{}` completed".format(
+                esc(label), bar, done_count, total
+            ),
+            parse_mode="MarkdownV2"
+        )
+
+    # 30-min follow-up
+    elif d.startswith("check30_"):
+        task_id = int(d.split("_")[1])
         data = load()
         task = next((t for t in data["tasks"] if t["id"] == task_id), None)
         if task and not task.get("done"):
             kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Ha, bajardim", callback_data="done_{}".format(task_id)),
-                InlineKeyboardButton("⏰ Keyinroq", callback_data="later_{}".format(task_id)),
+                InlineKeyboardButton("✅ Yes, done!", callback_data="done_{}".format(task_id)),
+                InlineKeyboardButton("⏰ Not yet", callback_data="later_{}".format(task_id)),
             ]])
             await q.edit_message_text(
-                "❓ *{}* taskinni bajardingizmi?".format(esc(task["label"])),
+                "❓ Did you complete *{}*?".format(esc(task["label"])),
                 parse_mode="MarkdownV2",
                 reply_markup=kb
             )
         else:
-            await q.edit_message_text("✅ _Task allaqachon bajarilgan\\._", parse_mode="MarkdownV2")
+            await q.edit_message_text("✅ _Task already completed\\._", parse_mode="MarkdownV2")
 
-    elif q.data.startswith("later_"):
-        await q.edit_message_text("⏰ _Keyinroq eslataman\\._", parse_mode="MarkdownV2")
+    elif d.startswith("later_"):
+        await q.edit_message_text("⏰ _Got it\\. I'll remind you again later\\._", parse_mode="MarkdownV2")
 
-async def message_handler(update: Update, ctx):
+# ── MESSAGE HANDLER ──────────────────────────────────────────────────────────
+async def message_handler(update, ctx):
     chat_id = update.effective_chat.id
     text = update.message.text
     state = user_state.get(chat_id, "")
 
-    if text == "📋 Rejalar":
+    if text == "📋 My Tasks":
         await show_tasks(update, ctx)
-    elif text == "✅ Bajarildi":
+    elif text == "✅ Mark Done":
         await show_done_menu(update, ctx)
-    elif text == "➕ Task qo'sh":
+    elif text == "↩️ Undo Done":
+        await show_undo_menu(update, ctx)
+    elif text == "➕ Add Task":
         await start_add_task(update, ctx)
     elif text == "📊 Daily Report":
         await show_daily_report(update, ctx)
@@ -264,19 +375,22 @@ async def message_handler(update: Update, ctx):
     elif state == "add_label":
         user_state[chat_id] = "add_time:" + text
         await update.message.reply_text(
-            "⏰ *Vaqt bormi?* Yozing \\(masalan `14:30`\\) yoki *Yo'q* deb yozing:",
+            "⏰ *Does this task have a specific time?*\n\nType the time \\(e\\.g\\. `14:30`\\) or type *No*:",
             parse_mode="MarkdownV2", reply_markup=MAIN_KB
         )
 
     elif state.startswith("add_time:"):
         label = state.replace("add_time:", "")
         vaqt = None
-        if text.strip().lower() not in ["yoq", "yo'q", "yok", "-", "skip"]:
+        if text.strip().lower() not in ["no", "n", "-", "skip", "none"]:
             try:
                 datetime.strptime(text.strip(), "%H:%M")
                 vaqt = text.strip()
             except ValueError:
-                await update.message.reply_text("❌ Format noto'g'ri\\. Qaytadan: `14:30` yoki *Yo'q*", parse_mode="MarkdownV2")
+                await update.message.reply_text(
+                    "❌ Wrong format\\. Use `14:30` or type *No*:",
+                    parse_mode="MarkdownV2"
+                )
                 return
 
         data = load()
@@ -286,34 +400,34 @@ async def message_handler(update: Update, ctx):
             "time": vaqt,
             "done": False,
             "auto": False,
+            "reminded": False,
             "reminded_30": False,
+            "reminded_at": None,
         }
         data["tasks"].append(new_task)
-        if vaqt:
-            data["tasks"].sort(key=lambda x: x["time"] or "99:99")
+        data["tasks"].sort(key=lambda x: (x["time"] or "99:99"))
         save(data)
         user_state[chat_id] = None
 
-        time_str = " ⏰ `{}`".format(vaqt) if vaqt else " \\(vaqtsiz\\)"
+        time_str = " at ⏰ `{}`".format(vaqt) if vaqt else " \\(no time set\\)"
         await update.message.reply_text(
-            "✅ Task qo'shildi\\!\n\n📌 *{}*{}".format(esc(label), time_str),
+            "✅ Task added\\!\n\n📌 *{}*{}".format(esc(label), time_str),
             parse_mode="MarkdownV2", reply_markup=MAIN_KB
         )
     else:
-        await update.message.reply_text("📌 Tugmalardan foydalaning:", reply_markup=MAIN_KB)
+        await update.message.reply_text("📌 Use the buttons below:", reply_markup=MAIN_KB)
 
 # ── SCHEDULED JOBS ───────────────────────────────────────────────────────────
 
-async def job_ertalab(app):
-    """Har kuni 07:00 da reset va ertalabki salom"""
+async def job_morning(app):
     data = load()
     data = reset_daily(data)
-
     tasks = data["tasks"]
+
     if not tasks:
         await app.bot.send_message(
             chat_id=CHAT_ID,
-            text="☀️ *Xayrli tong\\!*\n\n_Bugun yakshanba — dam oling\\!_",
+            text="☀️ *Good morning\\!*\n\n_Today is Sunday — rest and recharge\\! 🌿_",
             parse_mode="MarkdownV2"
         )
         return
@@ -323,16 +437,16 @@ async def job_ertalab(app):
     bar = progress_bar(done, total)
 
     lines = [
-        "☀️ *Xayrli tong\\!* Bugungi rejalar:\n",
-        "{} `{}/{}` — *{}%*\n".format(bar, done, total, round(done/total*100) if total else 0),
+        "☀️ *Good morning\\!* Here are your tasks for today:\n",
+        "{} `{}/{}` completed\n".format(bar, done, total),
     ]
     for t in tasks:
         lines.append(task_line(t))
+    lines.append("\n💪 _Let's make today count\\!_")
 
     await app.bot.send_message(chat_id=CHAT_ID, text="\n".join(lines), parse_mode="MarkdownV2")
 
-async def job_vaqt_eslatma(app):
-    """Har daqiqada vaqtli tasklarni tekshirish"""
+async def job_time_reminder(app):
     now = datetime.now(TZ).strftime("%H:%M")
     data = load()
     changed = False
@@ -342,7 +456,7 @@ async def job_vaqt_eslatma(app):
             await app.bot.send_message(
                 chat_id=CHAT_ID,
                 parse_mode="MarkdownV2",
-                text="⏰ *Vaqt keldi\\!*\n\n📌 *{}* — `{}`\n\n_Bajaring va ✅ Bajarildi tugmasini bosing\\!_".format(
+                text="⏰ *Time to do it\\!*\n\n📌 *{}* — `{}`\n\n_Complete it and tap ✅ Mark Done\\._".format(
                     esc(t["label"]), t["time"]
                 )
             )
@@ -353,32 +467,31 @@ async def job_vaqt_eslatma(app):
     if changed:
         save(data)
 
-async def job_30min_tekshirish(app):
-    """Har daqiqada: vaqti kelgan va bajarilmagan task 30 daqiqadan o'tganmi?"""
+async def job_30min_check(app):
     now = datetime.now(TZ)
-    now_str = now.strftime("%H:%M")
     data = load()
     changed = False
 
     for t in data["tasks"]:
         if (t.get("reminded") and
-            not t.get("done") and
-            not t.get("reminded_30") and
-            t.get("reminded_at")):
+                not t.get("done") and
+                not t.get("reminded_30") and
+                t.get("reminded_at")):
             try:
                 reminded_time = datetime.strptime(t["reminded_at"], "%H:%M").replace(
-                    year=now.year, month=now.month, day=now.day, tzinfo=TZ
+                    year=now.year, month=now.month, day=now.day
                 )
+                reminded_time = TZ.localize(reminded_time)
                 diff = (now - reminded_time).total_seconds() / 60
                 if diff >= 30:
                     kb = InlineKeyboardMarkup([[
-                        InlineKeyboardButton("✅ Ha, bajardim", callback_data="done_{}".format(t["id"])),
-                        InlineKeyboardButton("⏰ Keyinroq", callback_data="later_{}".format(t["id"])),
+                        InlineKeyboardButton("✅ Yes, done!", callback_data="done_{}".format(t["id"])),
+                        InlineKeyboardButton("⏰ Not yet", callback_data="later_{}".format(t["id"])),
                     ]])
                     await app.bot.send_message(
                         chat_id=CHAT_ID,
                         parse_mode="MarkdownV2",
-                        text="🔔 *Eslatma\\!*\n\n_{}_  taskini bajardingizmi?".format(esc(t["label"])),
+                        text="🔔 *Reminder\\!*\n\nDid you complete *{}*?".format(esc(t["label"])),
                         reply_markup=kb
                     )
                     t["reminded_30"] = True
@@ -389,8 +502,7 @@ async def job_30min_tekshirish(app):
     if changed:
         save(data)
 
-async def job_kechki_report(app):
-    """22:00 da kunlik yakuniy report"""
+async def job_evening_report(app):
     data = load()
     tasks = data["tasks"]
     if not tasks:
@@ -399,51 +511,71 @@ async def job_kechki_report(app):
     done = [t for t in tasks if t.get("done")]
     undone = [t for t in tasks if not t.get("done")]
     pct = round(len(done) / len(tasks) * 100)
+    bar = progress_bar(len(done), len(tasks))
 
     lines = [
-        "🌙 *Kunlik yakuniy hisobot*\n",
-        "📈 Samaradorlik: *{}%*".format(pct),
-        "✅ Bajarildi: *{}/{}*\n".format(len(done), len(tasks)),
+        "🌙 *Daily Report — {}*\n".format(esc(today_str())),
+        "{} *{}%* completed".format(bar, pct),
+        "✅ Done: *{}*   ❌ Remaining: *{}*\n".format(len(done), len(tasks)),
     ]
     if done:
-        lines.append("*✅ Bajarilgan:*")
+        lines.append("*✅ Completed:*")
         for t in done:
-            lines.append("  • {}".format(esc(t["label"])))
+            time_str = " `{}`".format(t["time"]) if t.get("time") else ""
+            lines.append("  • {}{}".format(time_str, esc(t["label"])))
     if undone:
-        lines.append("\n*❌ Bajarilmagan:*")
+        lines.append("\n*❌ Not completed:*")
         for t in undone:
-            lines.append("  • {}".format(esc(t["label"])))
+            time_str = " `{}`".format(t["time"]) if t.get("time") else ""
+            lines.append("  • {}{}".format(time_str, esc(t["label"])))
 
     if pct == 100:
-        lines.append("\n🏆 *Mukammal kun\\! Zo'r\\!*")
+        lines.append("\n🏆 *Perfect day\\! You crushed it\\!*")
     elif pct >= 70:
-        lines.append("\n👍 *Yaxshi natija\\!*")
+        lines.append("\n👍 *Good job\\! Keep pushing\\!*")
+    elif pct >= 40:
+        lines.append("\n💪 *You can do better tomorrow\\!*")
     else:
-        lines.append("\n💡 _Ertaga yanada yaxshiroq qilasiz\\!_")
+        lines.append("\n💡 _Tomorrow is a fresh start\\!_")
 
     await app.bot.send_message(chat_id=CHAT_ID, text="\n".join(lines), parse_mode="MarkdownV2")
 
 # ── MAIN ────────────────────────────────────────────────────────────────────
-
 def main():
     lock = acquire_lock()
 
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("rejalar", show_tasks))
+    app.add_handler(CommandHandler("tasks", show_tasks))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
     scheduler = AsyncIOScheduler(timezone=TZ)
-    scheduler.add_job(job_ertalab,          "cron", hour=7,  minute=0,  args=[app])
-    scheduler.add_job(job_vaqt_eslatma,     "cron", minute="*",         args=[app])
-    scheduler.add_job(job_30min_tekshirish, "cron", minute="*",         args=[app])
-    scheduler.add_job(job_kechki_report,    "cron", hour=22, minute=0,  args=[app])
+    scheduler.add_job(job_morning,        "cron", hour=7,  minute=0,  args=[app])
+    scheduler.add_job(job_time_reminder,  "cron", minute="*",         args=[app])
+    scheduler.add_job(job_30min_check,    "cron", minute="*",         args=[app])
+    scheduler.add_job(job_evening_report, "cron", hour=23, minute=0,  args=[app])
     scheduler.start()
 
-    log.info("Bot ishga tushdi!")
+    log.info("Bot started!")
     app.run_polling(drop_pending_updates=True)
+
+async def cmd_start(update, ctx):
+    data = load()
+    data = reset_daily(data)
+    await update.message.reply_text(
+        "👋 *Hello\\!* I'm your Daily Planner Bot\\.\n\n"
+        "📋 *My Tasks* — view today's tasks\n"
+        "✅ *Mark Done* — mark one or multiple tasks\n"
+        "↩️ *Undo Done* — unmark a task\n"
+        "➕ *Add Task* — add a new task\n"
+        "📊 *Daily Report* — today's summary\n\n"
+        "_Tasks reset automatically every day at 7:00 AM\\._\n"
+        "_Daily report sent at 11:00 PM\\._",
+        parse_mode="MarkdownV2",
+        reply_markup=MAIN_KB
+    )
 
 if __name__ == "__main__":
     main()
