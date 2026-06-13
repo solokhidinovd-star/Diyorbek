@@ -10,7 +10,7 @@ from apscheduler.jobstores.memory import MemoryJobStore
 import pytz
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
-TOKEN = "8849559349:AAFQLKPjpVqfM-jLYWoB9j1f7Q4QbKNptDg"
+TOKEN = "8849559349:AAExAjrFRTYQ7rFMQbiOOG0mK8CFoQfcwsY"
 CHAT_ID = 6456736085
 TZ = pytz.timezone("Asia/Tashkent")
 
