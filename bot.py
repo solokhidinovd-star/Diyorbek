@@ -2,30 +2,20 @@ import logging
 import json
 import os
 import sys
-import fcntl
 from datetime import datetime, date, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.jobstores.memory import MemoryJobStore
 import pytz
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
 TOKEN = "8849559349:AAFQLKPjpVqfM-jLYWoB9j1f7Q4QbKNptDg"
 CHAT_ID = 6456736085
 TZ = pytz.timezone("Asia/Tashkent")
-LOCK_FILE = "/tmp/dailybot.lock"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger(__name__)
-
-def acquire_lock():
-    try:
-        lf = open(LOCK_FILE, "w")
-        fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return lf
-    except IOError:
-        log.warning("Bot is already running!")
-        sys.exit(0)
 
 AUTO_TASKS = [
     {"label": "CRM check",                     "time": "10:00"},
@@ -42,7 +32,7 @@ def load():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"tasks": [], "last_date": ""}
+    return {"tasks": [], "last_date": "", "sent_reminders": {}, "scheduled": []}
 
 def save(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -59,7 +49,8 @@ def next_id(tasks):
 
 MAIN_KB = ReplyKeyboardMarkup([
     ["📋 My Tasks", "✅ Mark Done"],
-    ["➕ Add Task",  "📊 Daily Report"],
+    ["➕ Add Task",  "🔔 Schedule Reminder"],
+    ["📊 Daily Report"],
 ], resize_keyboard=True)
 
 def esc(text):
@@ -87,6 +78,7 @@ def reset_daily(data):
     if data.get("last_date") == today:
         return data
     data["tasks"] = []
+    data["sent_reminders"] = {}
     if not is_sunday():
         for i, at in enumerate(AUTO_TASKS):
             data["tasks"].append({
@@ -95,9 +87,8 @@ def reset_daily(data):
                 "time": at["time"],
                 "done": False,
                 "auto": True,
-                "reminded": False,
-                "reminded_30": False,
                 "reminded_at": None,
+                "reminded_30": False,
             })
     data["last_date"] = today
     save(data)
@@ -124,26 +115,21 @@ async def show_tasks(update, ctx=None):
     data = load()
     data = reset_daily(data)
     tasks = data["tasks"]
-
     if not tasks:
         await update.message.reply_text(
             "📭 _No tasks for today\\._\n\nUse ➕ *Add Task* to add one\\!",
             parse_mode="MarkdownV2", reply_markup=MAIN_KB
         )
         return
-
     done = sum(1 for t in tasks if t.get("done"))
     total = len(tasks)
-    pct = round(done / total * 100)
     bar = progress_bar(done, total)
-
     lines = [
         "📋 *Today's Tasks*\n",
-        "{} `{}/{}` — *{}%* completed\n".format(bar, done, total, pct),
+        "{} `{}/{}` — *{}%* completed\n".format(bar, done, total, round(done/total*100)),
     ]
     for t in tasks:
         lines.append(task_line(t))
-
     await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=MAIN_KB)
 
 async def show_done_menu(update, ctx):
@@ -171,19 +157,16 @@ async def show_done_menu(update, ctx):
 async def show_daily_report(update, ctx):
     data = load()
     tasks = data["tasks"]
-
     if not tasks:
         await update.message.reply_text(
             "📭 _No tasks recorded for today\\._",
             parse_mode="MarkdownV2", reply_markup=MAIN_KB
         )
         return
-
     done = [t for t in tasks if t.get("done")]
     undone = [t for t in tasks if not t.get("done")]
     pct = round(len(done) / len(tasks) * 100)
     bar = progress_bar(len(done), len(tasks))
-
     lines = [
         "📊 *Daily Report — {}*\n".format(esc(today_str())),
         "{} *{}%* completed".format(bar, pct),
@@ -199,7 +182,6 @@ async def show_daily_report(update, ctx):
         for t in undone:
             time_str = " `{}`".format(t["time"]) if t.get("time") else ""
             lines.append("  • {}{}".format(time_str, esc(t["label"])))
-
     if pct == 100:
         lines.append("\n🏆 *Perfect day\\! You crushed it\\!*")
     elif pct >= 70:
@@ -208,7 +190,6 @@ async def show_daily_report(update, ctx):
         lines.append("\n💪 *You can do better tomorrow\\!*")
     else:
         lines.append("\n💡 _Tomorrow is a fresh start\\!_")
-
     await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=MAIN_KB)
 
 async def start_add_task(update, ctx):
@@ -232,13 +213,12 @@ async def callback_handler(update, ctx):
                 label = t["label"]
                 break
         save(data)
-
         done = sum(1 for t in data["tasks"] if t.get("done"))
         total = len(data["tasks"])
-        pct = round(done / total * 100)
         bar = progress_bar(done, total)
-
-        msg = "✅ *{}* — marked as done\\!\n\n{} `{}/{}` — *{}%*".format(esc(label), bar, done, total, pct)
+        msg = "✅ *{}* — marked as done\\!\n\n{} `{}/{}` — *{}%*".format(
+            esc(label), bar, done, total, round(done/total*100)
+        )
         if done == total:
             msg += "\n\n🏆 *All tasks completed\\! Excellent work\\!*"
         await q.edit_message_text(msg, parse_mode="MarkdownV2")
@@ -276,6 +256,58 @@ async def message_handler(update, ctx):
         await start_add_task(update, ctx)
     elif text == "📊 Daily Report":
         await show_daily_report(update, ctx)
+    elif text == "🔔 Schedule Reminder":
+        user_state[chat_id] = "sched_label"
+        await update.message.reply_text(
+            "🔔 *Schedule a Reminder*
+
+✏️ Enter the reminder text:",
+            parse_mode="MarkdownV2", reply_markup=MAIN_KB
+        )
+
+    elif state == "sched_label":
+        user_state[chat_id] = "sched_datetime:" + text
+        await update.message.reply_text(
+            "📅 *When should I remind you?*
+
+Format: `DD.MM.YYYY HH:MM`
+Example: `15.06.2026 14:30`",
+            parse_mode="MarkdownV2", reply_markup=MAIN_KB
+        )
+
+    elif state.startswith("sched_datetime:"):
+        label = state.replace("sched_datetime:", "")
+        try:
+            dt = datetime.strptime(text.strip(), "%d.%m.%Y %H:%M")
+            dt_aware = TZ.localize(dt)
+            now_aware = datetime.now(TZ)
+            if dt_aware <= now_aware:
+                await update.message.reply_text(
+                    "❌ This time has already passed\. Please enter a future date and time:",
+                    parse_mode="MarkdownV2"
+                )
+                return
+            data = load()
+            data.setdefault("scheduled", []).append({
+                "id": len(data.get("scheduled", [])) + 1,
+                "label": label,
+                "datetime": dt.strftime("%Y-%m-%d %H:%M"),
+                "sent": False,
+            })
+            save(data)
+            user_state[chat_id] = None
+            await update.message.reply_text(
+                "✅ Reminder set\!
+
+🔔 *{}*
+📅 `{}`".format(esc(label), esc(text.strip())),
+                parse_mode="MarkdownV2", reply_markup=MAIN_KB
+            )
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Wrong format\. Use: `15\.06\.2026 14:30`",
+                parse_mode="MarkdownV2"
+            )
 
     elif state == "add_label":
         user_state[chat_id] = "add_time:" + text
@@ -283,7 +315,6 @@ async def message_handler(update, ctx):
             "⏰ *Does this task have a specific time?*\n\nType the time \\(e\\.g\\. `14:30`\\) or type *No*:",
             parse_mode="MarkdownV2", reply_markup=MAIN_KB
         )
-
     elif state.startswith("add_time:"):
         label = state.replace("add_time:", "")
         vaqt = None
@@ -297,7 +328,6 @@ async def message_handler(update, ctx):
                     parse_mode="MarkdownV2"
                 )
                 return
-
         data = load()
         new_task = {
             "id": next_id(data["tasks"]),
@@ -305,15 +335,13 @@ async def message_handler(update, ctx):
             "time": vaqt,
             "done": False,
             "auto": False,
-            "reminded": False,
-            "reminded_30": False,
             "reminded_at": None,
+            "reminded_30": False,
         }
         data["tasks"].append(new_task)
         data["tasks"].sort(key=lambda x: (x["time"] or "99:99"))
         save(data)
         user_state[chat_id] = None
-
         time_str = " at ⏰ `{}`".format(vaqt) if vaqt else " \\(no time set\\)"
         await update.message.reply_text(
             "✅ Task added\\!\n\n📌 *{}*{}".format(esc(label), time_str),
@@ -329,6 +357,13 @@ async def job_morning(app):
     data = reset_daily(data)
     tasks = data["tasks"]
 
+    # Bugun ertalab yuborilganmi? tekshirish
+    sent_key = "morning_{}".format(today_str())
+    if data.get("sent_reminders", {}).get(sent_key):
+        return
+    data.setdefault("sent_reminders", {})[sent_key] = True
+    save(data)
+
     if not tasks:
         await app.bot.send_message(
             chat_id=CHAT_ID,
@@ -340,7 +375,6 @@ async def job_morning(app):
     done = sum(1 for t in tasks if t.get("done"))
     total = len(tasks)
     bar = progress_bar(done, total)
-
     lines = [
         "☀️ *Good morning\\!* Here are your tasks for today:\n",
         "{} `{}/{}` completed\n".format(bar, done, total),
@@ -348,7 +382,6 @@ async def job_morning(app):
     for t in tasks:
         lines.append(task_line(t))
     lines.append("\n💪 _Let's make today count\\!_")
-
     await app.bot.send_message(chat_id=CHAT_ID, text="\n".join(lines), parse_mode="MarkdownV2")
 
 async def job_time_reminder(app):
@@ -357,7 +390,15 @@ async def job_time_reminder(app):
     changed = False
 
     for t in data["tasks"]:
-        if t.get("time") == now and not t.get("done") and not t.get("reminded"):
+        if not t.get("time") or t.get("done"):
+            continue
+
+        # Unique key: task id + time + date
+        sent_key = "remind_{}_{}_{}" .format(t["id"], t["time"], today_str())
+        if data.get("sent_reminders", {}).get(sent_key):
+            continue
+
+        if t["time"] == now:
             await app.bot.send_message(
                 chat_id=CHAT_ID,
                 parse_mode="MarkdownV2",
@@ -365,7 +406,7 @@ async def job_time_reminder(app):
                     esc(t["label"]), t["time"]
                 )
             )
-            t["reminded"] = True
+            data.setdefault("sent_reminders", {})[sent_key] = True
             t["reminded_at"] = now
             changed = True
 
@@ -378,32 +419,60 @@ async def job_30min_check(app):
     changed = False
 
     for t in data["tasks"]:
-        if (t.get("reminded") and
-                not t.get("done") and
-                not t.get("reminded_30") and
-                t.get("reminded_at")):
-            try:
-                reminded_time = datetime.strptime(t["reminded_at"], "%H:%M").replace(
-                    year=now.year, month=now.month, day=now.day
-                )
-                reminded_time = TZ.localize(reminded_time)
-                diff = (now - reminded_time).total_seconds() / 60
-                if diff >= 30:
-                    kb = InlineKeyboardMarkup([[
-                        InlineKeyboardButton("✅ Yes, done!", callback_data="done_{}".format(t["id"])),
-                        InlineKeyboardButton("⏰ Not yet", callback_data="later_{}".format(t["id"])),
-                    ]])
-                    await app.bot.send_message(
-                        chat_id=CHAT_ID,
-                        parse_mode="MarkdownV2",
-                        text="🔔 *Reminder\\!*\n\nDid you complete *{}*?".format(esc(t["label"])),
-                        reply_markup=kb
-                    )
-                    t["reminded_30"] = True
-                    changed = True
-            except Exception as e:
-                log.error("30min check error: {}".format(e))
+        if not t.get("reminded_at") or t.get("done") or t.get("reminded_30"):
+            continue
 
+        sent_key = "check30_{}_{}".format(t["id"], today_str())
+        if data.get("sent_reminders", {}).get(sent_key):
+            continue
+
+        try:
+            reminded_time = datetime.strptime(t["reminded_at"], "%H:%M").replace(
+                year=now.year, month=now.month, day=now.day
+            )
+            reminded_time = TZ.localize(reminded_time)
+            diff = (now - reminded_time).total_seconds() / 60
+            if diff >= 30:
+                kb = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✅ Yes, done!", callback_data="done_{}".format(t["id"])),
+                    InlineKeyboardButton("⏰ Not yet", callback_data="later_{}".format(t["id"])),
+                ]])
+                await app.bot.send_message(
+                    chat_id=CHAT_ID,
+                    parse_mode="MarkdownV2",
+                    text="🔔 *Reminder\\!*\n\nDid you complete *{}*?".format(esc(t["label"])),
+                    reply_markup=kb
+                )
+                data.setdefault("sent_reminders", {})[sent_key] = True
+                t["reminded_30"] = True
+                changed = True
+        except Exception as e:
+            log.error("30min check error: {}".format(e))
+
+    if changed:
+        save(data)
+
+async def job_scheduled_reminders(app):
+    now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
+    data = load()
+    changed = False
+    for r in data.get("scheduled", []):
+        if not r.get("sent") and r.get("datetime") == now:
+            sent_key = "sched_{}_{}".format(r["id"], r["datetime"])
+            if data.get("sent_reminders", {}).get(sent_key):
+                continue
+            await app.bot.send_message(
+                chat_id=CHAT_ID,
+                parse_mode="MarkdownV2",
+                text="🔔 *Reminder\!*
+
+📌 *{}*
+
+_This is your scheduled reminder\._".format(esc(r["label"]))
+            )
+            data.setdefault("sent_reminders", {})[sent_key] = True
+            r["sent"] = True
+            changed = True
     if changed:
         save(data)
 
@@ -413,11 +482,16 @@ async def job_evening_report(app):
     if not tasks:
         return
 
+    sent_key = "report_{}".format(today_str())
+    if data.get("sent_reminders", {}).get(sent_key):
+        return
+    data.setdefault("sent_reminders", {})[sent_key] = True
+    save(data)
+
     done = [t for t in tasks if t.get("done")]
     undone = [t for t in tasks if not t.get("done")]
     pct = round(len(done) / len(tasks) * 100)
     bar = progress_bar(len(done), len(tasks))
-
     lines = [
         "🌙 *Daily Report — {}*\n".format(esc(today_str())),
         "{} *{}%* completed".format(bar, pct),
@@ -433,7 +507,6 @@ async def job_evening_report(app):
         for t in undone:
             time_str = " `{}`".format(t["time"]) if t.get("time") else ""
             lines.append("  • {}{}".format(time_str, esc(t["label"])))
-
     if pct == 100:
         lines.append("\n🏆 *Perfect day\\! You crushed it\\!*")
     elif pct >= 70:
@@ -442,13 +515,10 @@ async def job_evening_report(app):
         lines.append("\n💪 *You can do better tomorrow\\!*")
     else:
         lines.append("\n💡 _Tomorrow is a fresh start\\!_")
-
     await app.bot.send_message(chat_id=CHAT_ID, text="\n".join(lines), parse_mode="MarkdownV2")
 
 # ── MAIN ────────────────────────────────────────────────────────────────────
 def main():
-    lock = acquire_lock()
-
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", cmd_start))
@@ -456,11 +526,16 @@ def main():
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-    scheduler = AsyncIOScheduler(timezone=TZ)
+    scheduler = AsyncIOScheduler(
+        timezone=TZ,
+        jobstores={"default": MemoryJobStore()},
+        job_defaults={"coalesce": True, "max_instances": 1}
+    )
     scheduler.add_job(job_morning,        "cron", hour=7,  minute=0,  args=[app])
     scheduler.add_job(job_time_reminder,  "cron", minute="*",         args=[app])
     scheduler.add_job(job_30min_check,    "cron", minute="*",         args=[app])
-    scheduler.add_job(job_evening_report, "cron", hour=23, minute=0,  args=[app])
+    scheduler.add_job(job_evening_report,          "cron", hour=23, minute=0,  args=[app])
+    scheduler.add_job(job_scheduled_reminders,      "cron", minute="*",          args=[app])
     scheduler.start()
 
     log.info("Bot started!")
