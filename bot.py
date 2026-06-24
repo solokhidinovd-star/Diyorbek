@@ -9,7 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.memory import MemoryJobStore
 import pytz
 
-TOKEN = "8849559349:AAExAjrFRTYQ7rFMQbiOOG0mK8CFoQfcwsY"
+TOKEN = "8849559349:AAEnn05gUAfsHHQlWpSZp606wOJX5iy57j8"
 CHAT_ID = 6456736085
 TZ = pytz.timezone("Asia/Tashkent")
 
