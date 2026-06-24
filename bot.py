@@ -282,6 +282,13 @@ async def msg_handler(update, ctx):
     text  = update.message.text
     state = user_state.get(cid, "")
 
+    # Always clear state on main menu buttons
+    MAIN_BUTTONS = ["📋 My Tasks", "✅ Mark Done", "➕ Add Task", "🔁 Daily Tasks",
+                    "📊 Daily Report", "🔔 Schedule Reminder", "➕ Add Daily Task",
+                    "🗑 Remove Daily Task", "🔙 Back"]
+    if text in MAIN_BUTTONS:
+        user_state[cid] = ""
+
     # Main menu buttons
     if   text == "📋 My Tasks":           await show_tasks(update, ctx)
     elif text == "✅ Mark Done":           await show_done_menu(update, ctx)
@@ -451,7 +458,7 @@ async def job_30min(app):
     data = load()
     changed = False
     for t in data["tasks"]:
-        if not t.get("reminded_at") or t.get("done") or t.get("reminded_30"):
+        if not t.get("time") or not t.get("reminded_at") or t.get("done") or t.get("reminded_30"):
             continue
         try:
             rt   = TZ.localize(datetime.strptime(t["reminded_at"], "%H:%M").replace(
