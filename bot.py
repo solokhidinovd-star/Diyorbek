@@ -15,6 +15,8 @@ TZ = pytz.timezone("Asia/Tashkent")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
+import os as _os
+os.makedirs("/app/data", exist_ok=True)
 DATA_FILE = "/app/data/data.json"
 
 # ── DATA ────────────────────────────────────────────────────────────────────
